@@ -26,3 +26,10 @@ The first root configure reproduces the workspace-relative JUCE-path problem:
 JUCE exists at `deps/JUCE`, but the imported CMake expects `../deps/JUCE`.
 The intended standalone fix changes only that default path. Its RED and GREEN
 checkpoints and final validation results are recorded here before publication.
+
+- RED checkpoint `0d92d43`: the root configure failed because its JUCE lookup
+  used the old parent-workspace path, despite the pinned checkout being present
+  at the standalone root's `deps/JUCE`.
+- GREEN: the default JUCE path now resolves inside this repository. The same
+  configure command, in a fresh build directory, completes successfully. No
+  DSP, helper, processor, editor, protocol or regression-test source was changed.
