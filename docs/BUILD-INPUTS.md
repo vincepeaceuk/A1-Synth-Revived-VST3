@@ -43,9 +43,10 @@ archives and extraction history. The original Mac executable is PowerPC and is
 not the running sound engine. UI PNGs are converted original resources; arbitrary
 replacement images do not satisfy the recorded manifest.
 
-Download the Zig **0.15.2 aarch64-macos** toolchain from the official Zig project
-and extract its directory under `local/tools/`. The original archive's SHA256
-was `3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b`.
+Download the [Zig 0.15.2 aarch64-macos toolchain](https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz)
+and extract its directory under `local/tools/`. The official
+[download index](https://ziglang.org/download/index.json) records its SHA256 as
+`3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b`.
 The compiler is used to build the 32-bit Windows helper with strict warnings.
 
 ## Dependencies fetched by the build

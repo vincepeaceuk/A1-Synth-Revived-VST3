@@ -90,7 +90,6 @@ are not covered by the local acceptance record.
      -DCMAKE_BUILD_TYPE=Release \
      -DCMAKE_OSX_ARCHITECTURES=arm64
    cmake --build build --parallel 4
-   ctest --test-dir build --output-on-failure --parallel 1
    ```
 
    The first build fetches the pinned MIT-licensed x87 translation source and
@@ -117,6 +116,12 @@ are not covered by the local acceptance record.
    environment. The qualified setup already had this bottle; first-time setup
    on another Mac remains outside the verified workflow. See
    [BUILD-INPUTS.md](docs/BUILD-INPUTS.md#compatibility-environment).
+
+   Run the regression suite with that environment available:
+
+   ```sh
+   ctest --test-dir build --output-on-failure --parallel 1
+   ```
 
 ## Install and use
 
