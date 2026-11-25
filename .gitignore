@@ -1,0 +1,14 @@
+/local/
+/build*/
+/dist/
+/deps/
+/upstream/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
+*.log
+*.cpr
+*.bak
+*.vst3/

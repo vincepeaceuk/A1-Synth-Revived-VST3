@@ -1,0 +1,107 @@
+diff --git a/rosetta_loader/src/main.cpp b/rosetta_loader/src/main.cpp
+index bec36de..578782f 100644
+--- a/rosetta_loader/src/main.cpp
++++ b/rosetta_loader/src/main.cpp
+@@ -1512,6 +1512,8 @@ int main(int argc, char* argv[]) try {
+     }
+ 
+     // ── GRANDCHILD == the sidecar ───────────────────────────────────────────
++    // The translator must never retain the engine protocol socket.
++    close(STDIN_FILENO);
+     UnhookedNotice unhookedNotice;
+     if (cooperative) {
+         // Publish a receive port under the pid-based name; the target looks it
+@@ -1529,19 +1531,58 @@ int main(int argc, char* argv[]) try {
+             return 1;
+         }
+         VERBOSE_LOG("[rosettax87] cooperative service registered: %s\n", coopName.c_str());
++        // Watch the owned target before releasing it, including early close
++        // while its constructor has not yet sent the cooperative handshake.
++        int startupWatch = kqueue();
++        struct kevent watch;
++        EV_SET(&watch, parentPid, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, nullptr);
++        if (startupWatch < 0 || kevent(startupWatch, &watch, 1, nullptr, 0, nullptr) < 0) {
++            if (startupWatch >= 0) close(startupWatch);
++            return 1;
++        }
+         write(syncPipe[1], "x", 1);
+         close(syncPipe[1]);
+         unhookedNotice.prog = progArgv[0];  // the target is launched from here on
+         unhookedNotice.pid = parentPid;
+ 
+         x87_coop_request_rcv_t rcv{};
+-        kr = mach_msg(&rcv.req.header, MACH_RCV_MSG | MACH_RCV_TIMEOUT, 0, sizeof(rcv), servicePort,
+-                      30000, MACH_PORT_NULL);
++        for (unsigned elapsed = 0; elapsed < 30000; elapsed += 100) {
++            kr = mach_msg(&rcv.req.header, MACH_RCV_MSG | MACH_RCV_TIMEOUT, 0, sizeof(rcv), servicePort,
++                          100, MACH_PORT_NULL);
++            if (kr != MACH_RCV_TIMED_OUT) break;
++            struct kevent exited;
++            struct timespec immediate = {0, 0};
++            if (kevent(startupWatch, nullptr, 0, &exited, 1, &immediate) != 0) break;
++        }
++        close(startupWatch);
+         if (kr != KERN_SUCCESS) {
+             fprintf(stdout, "[rosettax87] cooperative handshake receive failed: 0x%x (%s)\n", kr,
+                     mach_error_string(kr));
+             return 1;
+         }
++        // This service is for exactly the original target, never another task.
++        pid_t senderPid = 0;
++        if (rcv.req.header.msgh_id != X87_COOP_MSGH_ID ||
++            rcv.req.header.msgh_size != sizeof(x87_coop_request_t) ||
++            !(rcv.req.header.msgh_bits & MACH_MSGH_BITS_COMPLEX) ||
++            rcv.req.body.msgh_descriptor_count != 2 ||
++            rcv.req.task_port.type != MACH_MSG_PORT_DESCRIPTOR ||
++            rcv.req.thread_port.type != MACH_MSG_PORT_DESCRIPTOR ||
++            pid_for_task(rcv.req.task_port.name, &senderPid) != KERN_SUCCESS || senderPid != parentPid) {
++            mach_msg_destroy(&rcv.req.header);
++            return 1;
++        }
++        thread_act_array_t threads = nullptr;
++        mach_msg_type_number_t count = 0;
++        bool ownsThread = false;
++        if (task_threads(rcv.req.task_port.name, &threads, &count) == KERN_SUCCESS) {
++            for (unsigned i = 0; i < count; ++i) {
++                ownsThread |= threads[i] == rcv.req.thread_port.name;
++                mach_port_deallocate(mach_task_self(), threads[i]);
++            }
++            vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threads), count * sizeof(thread_t));
++        }
++        if (!ownsThread) { mach_msg_destroy(&rcv.req.header); return 1; }
+         unhookedNotice.handshook = true;
+         task_t traceeTask = rcv.req.task_port.name;
+         thread_t traceeThread = rcv.req.thread_port.name;
+diff --git a/rosetta_loader/src/x87_trace.cpp b/rosetta_loader/src/x87_trace.cpp
+index a590317..63667b0 100644
+--- a/rosetta_loader/src/x87_trace.cpp
++++ b/rosetta_loader/src/x87_trace.cpp
+@@ -34,7 +34,7 @@ struct TraceState {
+ TraceState trace;
+ 
+ uint64_t acquire(uint64_t& value) {
+-    return std::atomic_ref<uint64_t>(value).load(std::memory_order_acquire);
++    return __atomic_load_n(&value, __ATOMIC_ACQUIRE);
+ }
+ 
+ void writeTrace() {
+@@ -49,8 +49,8 @@ void writeTrace() {
+     for (size_t i = 0; i < x87trace::kCount; ++i) {
+         // Take the producer's same nonblocking lock. This avoids relying
+         // on speculative/torn memcpy reads while an in-flight writer finishes.
+-        auto lock = std::atomic_ref<uint64_t>(source[i].locked);
+-        if (lock.fetch_or(1, std::memory_order_acquire))
++        auto* lock = &source[i].locked;
++        if (__atomic_fetch_or(lock, 1, __ATOMIC_ACQUIRE))
+             continue;
+         const uint64_t sequence = source[i].sequence;
+         if (sequence > floor && sequence <= next &&
+@@ -59,7 +59,7 @@ void writeTrace() {
+             records[i].locked = 0;
+             ++valid;
+         }
+-        lock.store(0, std::memory_order_release);
++        __atomic_store_n(lock, 0, __ATOMIC_RELEASE);
+     }
+     x87trace::FileHeader header{
+         .hash = trace.hash,
